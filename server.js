@@ -68,7 +68,7 @@ Search the web to find:
 2. The zoning district this parcel falls in, and the dimensional requirements for that district (front/side/rear setbacks, max height, max lot coverage, parking requirements) from the actual current zoning ordinance.
 3. Any environmental overlays that could constrain the buildable area: wetlands, floodplain, shoreland protection, conservation overlays.
 
-Respond ONLY with valid JSON in this exact shape, no markdown, no preamble:
+Respond with ONLY the JSON object below. No preamble, no explanation, no markdown formatting, no text before or after. Your entire response must be parseable as JSON:
 {
   "parcelId": "string or null",
   "lotSizeAcres": "string or null",
@@ -93,7 +93,7 @@ Respond ONLY with valid JSON in this exact shape, no markdown, no preamble:
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 2000,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 6 }],
         messages: [{ role: 'user', content: prompt }]
       })
     });
@@ -104,13 +104,28 @@ Respond ONLY with valid JSON in this exact shape, no markdown, no preamble:
     // Pull the final text block out of the response (it may include search steps first)
     const textBlocks = data.content.filter(b => b.type === 'text').map(b => b.text);
     const rawText = textBlocks[textBlocks.length - 1] || '';
-    const cleaned = rawText.replace(/```json|```/g, '').trim();
+
+    // Strip markdown code fences if present
+    let cleaned = rawText.replace(/```json|```/g, '').trim();
+
+    // Even with instructions, Claude sometimes adds a sentence before/after the JSON.
+    // Extract just the {...} block by finding the first { and matching last }.
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+    }
 
     let parsed;
     try {
       parsed = JSON.parse(cleaned);
-    } catch {
-      parsed = { error: 'Could not parse structured result', raw: rawText };
+    } catch (parseErr) {
+      console.error('JSON parse failed. Raw text was:', rawText);
+      parsed = {
+        error: 'Could not parse structured result',
+        rawText: rawText,
+        hint: 'The research itself likely succeeded - this is a formatting issue. Check server logs for the raw text.'
+      };
     }
 
     res.json(parsed);
